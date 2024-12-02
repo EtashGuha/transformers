@@ -3591,8 +3591,8 @@ class Trainer:
             labels = inputs.pop("labels")
         else:
             labels = None
-        breakpoint()
         outputs = model(**inputs)
+        print("MODEL FORWARD DONE", flush=True)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:

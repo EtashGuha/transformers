@@ -106,6 +106,11 @@ if is_torch_neuroncore_available(check_device=False):
 
 if is_torch_rdu_available():
     dist.init_process_group("mpi")
+    rank = dist.get_rank()
+    import torch_rdu
+    # setup RDU-JIT
+    my_dir = "_out/_out" + str(rank)
+    torch_rdu.set_torch_rdu_output_dir(my_dir)
 
 if is_sagemaker_mp_enabled():
     import smdistributed.modelparallel.torch as smp
