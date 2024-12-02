@@ -53,7 +53,7 @@ import torch.distributed as dist
 from huggingface_hub import ModelCard, create_repo, upload_folder
 from packaging import version
 from torch import nn
-from torch.utils.data import DataLoader, Dataset, IterableDataset, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, Dataset, IterableDataset, RandomSampler, SequentialSampler, DistributedSampler
 
 from . import __version__
 from .configuration_utils import PretrainedConfig
@@ -172,6 +172,7 @@ from .utils import (
     is_torch_neuroncore_available,
     is_torch_npu_available,
     is_torch_xla_available,
+    is_torch_rdu_available,
     is_torch_xpu_available,
     is_torchao_available,
     logging,
@@ -251,6 +252,15 @@ if is_accelerate_available():
 if is_accelerate_available("0.28.0"):
     from accelerate.utils import DataLoaderConfiguration
 
+def average_gradients(model, device):
+    # averaging weights across workers
+    size = float(dist.get_world_size())
+    for param in model.parameters():
+        # perform all_reduce on the host for now till we have runtime API support to device memory access for RDU
+        a = param.grad.to("cpu")
+        dist.all_reduce(a.data, op=dist.ReduceOp.SUM)
+        param.grad = a.to(device)
+        param.grad.data /= size
 
 def _is_peft_model(model):
     if is_peft_available():
@@ -899,7 +909,9 @@ class Trainer:
             return None
 
         # Build the sampler.
-        if self.args.group_by_length:
+        if is_torch_rdu_available():
+            return DistributedSampler(self.train_dataset)
+        elif self.args.group_by_length:
             if is_datasets_available() and isinstance(self.train_dataset, datasets.Dataset):
                 lengths = (
                     self.train_dataset[self.args.length_column_name]
@@ -3561,6 +3573,9 @@ class Trainer:
         if self.use_apex:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
+        elif is_torch_rdu_available():
+            loss.backward()
+            average_gradients(model, torch.device('rdu'))
         else:
             self.accelerator.backward(loss, **kwargs)
 
@@ -3576,8 +3591,8 @@ class Trainer:
             labels = inputs.pop("labels")
         else:
             labels = None
-        # breakpoint()
         outputs = model(**inputs)
+        print("MODEL FORWARD DONE", flush=True)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:

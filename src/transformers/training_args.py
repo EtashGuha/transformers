@@ -104,6 +104,13 @@ if is_torch_neuroncore_available(check_device=False):
                 if not isinstance(dist.group.WORLD, xbn.ProcessGroupXla):
                     raise AssertionError("Failed to initialize torch.distributed process group using XLA backend.")
 
+if is_torch_rdu_available():
+    dist.init_process_group("mpi")
+    rank = dist.get_rank()
+    import torch_rdu
+    # setup RDU-JIT
+    my_dir = "_out/_out" + str(rank)
+    torch_rdu.set_torch_rdu_output_dir(my_dir)
 
 if is_sagemaker_mp_enabled():
     import smdistributed.modelparallel.torch as smp
@@ -2212,6 +2219,8 @@ class TrainingArguments:
         if is_torch_xla_available():
             device = self.distributed_state.device
             self._n_gpu = 0
+        elif is_torch_rdu_available():
+            device = torch.device("rdu")
         elif is_sagemaker_dp_enabled() or is_sagemaker_mp_enabled():
             # Already set _n_gpu
             pass
@@ -2231,8 +2240,6 @@ class TrainingArguments:
                 device = torch.device("cpu")
             elif is_torch_mps_available():
                 device = torch.device("mps")
-            elif is_torch_rdu_available():
-                device = torch.device("rdu")
             elif is_torch_xpu_available():
                 if not is_ipex_available() and not is_accelerate_available("0.32.0.dev"):
                     raise ImportError("Using the XPU PyTorch backend requires `accelerate>=0.32.0.dev`")
@@ -2301,6 +2308,8 @@ class TrainingArguments:
         requires_backends(self, ["torch"])
         if is_torch_xla_available():
             return ParallelMode.TPU
+        elif is_torch_rdu_available():
+            return ParallelMode.DISTRIBUTED
         elif is_sagemaker_mp_enabled():
             return ParallelMode.SAGEMAKER_MODEL_PARALLEL
         elif is_sagemaker_dp_enabled():
